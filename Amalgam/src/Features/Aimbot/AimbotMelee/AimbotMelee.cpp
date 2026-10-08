@@ -6,6 +6,7 @@
 #include "../../Ticks/Ticks.h"
 #include "../../Visuals/Visuals.h"
 #include "../../AntiCheatCompatibility/AntiCheatCompatibility.h"
+#include "../../Misc/Misc.h"
 
 static inline bool AimFriendlyBuilding(CBaseObject* pBuilding)
 {
@@ -160,11 +161,36 @@ void CAimbotMelee::UpdateInfo(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCm
 				{	// demo charge fix for swing pred
 					pLocal->RemoveCond(TF_COND_SHIELD_CHARGE);
 					tMoveStorage.m_MoveData.m_flMaxSpeed = tMoveStorage.m_MoveData.m_flClientMaxSpeed = SDK::MaxSpeed(pLocal);
+					tMoveStorage.m_MoveData.m_flForwardMove = pCmd->forwardmove, tMoveStorage.m_MoveData.m_flSideMove = pCmd->sidemove;
 					pLocal->m_flMaxspeed() = tMoveStorage.m_MoveData.m_flMaxSpeed;
 				}
 			}
 			if (m_iDoubletapTicks && Vars::Doubletap::AntiWarp.Value && pLocal->m_hGroundEntity())
 				F::Ticks.AntiWarp(pLocal, pCmd->viewangles.y, tMoveStorage.m_MoveData.m_flForwardMove, tMoveStorage.m_MoveData.m_flSideMove, iMax - i - 1);
+
+			if (bSwung && Vars::Misc::Movement::FastStop.Value && !(pCmd->buttons & IN_FORWARD))
+			{
+				G::DummyCmd.viewangles = Vec3{ pCmd->viewangles };
+				G::DummyCmd.forwardmove = G::DummyCmd.sidemove = 0;
+				G::DummyCmd.buttons = pCmd->buttons;
+				F::Misc.RunPost(pLocal, &G::DummyCmd);
+
+				tMoveStorage.m_MoveData.m_flForwardMove = G::DummyCmd.forwardmove;
+				tMoveStorage.m_MoveData.m_flSideMove = G::DummyCmd.sidemove;
+			}
+
+
+			if (bSwung && Vars::Misc::Movement::FastStop.Value && !(pCmd->buttons & (IN_FORWARD | IN_BACK | IN_MOVELEFT | IN_MOVERIGHT)))
+			{
+				G::DummyCmd.viewangles = Vec3{ pCmd->viewangles };
+				G::DummyCmd.forwardmove = pCmd->forwardmove;
+				G::DummyCmd.sidemove = pCmd->sidemove;
+				G::DummyCmd.buttons = pCmd->buttons;
+				F::Misc.RunPost(pLocal, &G::DummyCmd);
+
+				tMoveStorage.m_MoveData.m_flForwardMove = G::DummyCmd.forwardmove;
+				tMoveStorage.m_MoveData.m_flSideMove = G::DummyCmd.sidemove;
+			}
 
 			F::MoveSim.RunTick(tMoveStorage);
 
@@ -275,19 +301,19 @@ bool CAimbotMelee::CanBackstab(CBaseEntity* pTarget, CTFPlayer* pLocal, Vec3 vEy
 	float flViewAnglesMinDot = -0.3f + 0.0031f; // 0.00306795676297 ?
 
 	auto fTestDots = [&](Vec3 vTargetAngles)
-	{
-		Vec3 vOwnerForward; Math::AngleVectors(vEyeAngles, &vOwnerForward);
-		vOwnerForward.Normalize2D();
+		{
+			Vec3 vOwnerForward; Math::AngleVectors(vEyeAngles, &vOwnerForward);
+			vOwnerForward.Normalize2D();
 
-		Vec3 vTargetForward; Math::AngleVectors(vTargetAngles, &vTargetForward);
-		vTargetForward.Normalize2D();
+			Vec3 vTargetForward; Math::AngleVectors(vTargetAngles, &vTargetForward);
+			vTargetForward.Normalize2D();
 
-		const float flPosVsTargetViewDot = vToTarget.Dot(vTargetForward); // Behind?
-		const float flPosVsOwnerViewDot = vToTarget.Dot(vOwnerForward); // Facing?
-		const float flViewAnglesDot = vTargetForward.Dot(vOwnerForward); // Facestab?
+			const float flPosVsTargetViewDot = vToTarget.Dot(vTargetForward); // Behind?
+			const float flPosVsOwnerViewDot = vToTarget.Dot(vOwnerForward); // Facing?
+			const float flViewAnglesDot = vTargetForward.Dot(vOwnerForward); // Facestab?
 
-		return flPosVsTargetViewDot > flPosVsTargetViewMinDot && flPosVsOwnerViewDot > flPosVsOwnerViewMinDot && flViewAnglesDot > flViewAnglesMinDot;
-	};
+			return flPosVsTargetViewDot > flPosVsTargetViewMinDot && flPosVsOwnerViewDot > flPosVsOwnerViewMinDot && flViewAnglesDot > flViewAnglesMinDot;
+		};
 
 	Vec3 vTargetAngles = { 0.f, H::Entities.GetEyeAngles(pTarget->entindex()).y, 0.f };
 	if (!(Vars::Aimbot::Melee::BackstabFlags.Value & Vars::Aimbot::Melee::BackstabFlagsEnum::AccountPing))
@@ -398,7 +424,7 @@ int CAimbotMelee::CanHit(Target_t& tTarget, CTFPlayer* pLocal, CTFWeaponBase* pW
 
 		if (bReturn && Vars::Aimbot::Melee::AutoBackstab.Value && pWeapon->GetWeaponID() == TF_WEAPON_KNIFE)
 			bReturn = CanBackstab(tTarget.m_pEntity, pLocal, tTarget.m_vAngleTo);
-		
+
 		tTarget.m_pEntity->SetAbsOrigin(vRestoreOrigin);
 		tTarget.m_pEntity->m_vecMins() = vRestoreMins;
 		tTarget.m_pEntity->m_vecMaxs() = vRestoreMaxs;
@@ -407,7 +433,7 @@ int CAimbotMelee::CanHit(Target_t& tTarget, CTFPlayer* pLocal, CTFWeaponBase* pW
 		{
 			tTarget.m_pRecord = pRecord;
 			tTarget.m_bBacktrack = tTarget.m_iTargetType == TargetEnum::Player;
-			
+
 			return true;
 		}
 		else switch (Vars::Aimbot::General::AimType.Value)
@@ -505,10 +531,10 @@ static inline void DrawVisuals(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserC
 	G::AimPoint = { tTarget.m_vPos, I::GlobalVars->tickcount };
 
 	bool bPath = Vars::Visuals::Prediction::SwingLines.Value && Vars::Visuals::Prediction::PlayerPath.Value;
-	bool bLine = Vars::Visuals::Line::TracersEnabled.Value;
+	//bool bLine = Vars::Visuals::Line::TracersEnabled.Value;
 	bool bBoxes = Vars::Visuals::Hitbox::BonesEnabled.Value & Vars::Visuals::Hitbox::BonesEnabledEnum::OnShot;
 	bool bRealPath = Vars::Visuals::Prediction::RealPath.Value;
-	if (bPath || bLine || bBoxes || bRealPath)
+	if (bPath /*|| bLine*/ || bBoxes || bRealPath)
 	{
 		if (pCmd->buttons & IN_ATTACK && G::CanPrimaryAttack && pWeapon->m_flSmackTime() < 0.f)
 		{
@@ -538,17 +564,17 @@ static inline void DrawVisuals(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserC
 		}
 		if (G::Attacking == 1)
 		{
-			if (bLine)
-			{
-				Vec3 vEyePos = pLocal->GetShootPos();
-				float flDist = vEyePos.DistTo(tTarget.m_vPos);
-				Vec3 vForward; Math::AngleVectors(tTarget.m_vAngleTo, &vForward);
+			//if (bLine)
+			//{
+			//	Vec3 vEyePos = pLocal->GetShootPos();
+			//	float flDist = vEyePos.DistTo(tTarget.m_vPos);
+			//	Vec3 vForward; Math::AngleVectors(tTarget.m_vAngleTo, &vForward);
 
-				if (Vars::Colors::LineIgnoreZ.Value.a)
-					G::LineStorage.emplace_back(std::pair<Vec3, Vec3>(vEyePos, vEyePos + vForward * flDist), I::GlobalVars->curtime + Vars::Visuals::Line::DrawDuration.Value, Vars::Colors::LineIgnoreZ.Value);
-				if (Vars::Colors::Line.Value.a)
-					G::LineStorage.emplace_back(std::pair<Vec3, Vec3>(vEyePos, vEyePos + vForward * flDist), I::GlobalVars->curtime + Vars::Visuals::Line::DrawDuration.Value, Vars::Colors::Line.Value, true);
-			}
+			//	if (Vars::Colors::LineIgnoreZ.Value.a)
+			//		G::LineStorage.emplace_back(std::pair<Vec3, Vec3>(vEyePos, vEyePos + vForward * flDist), I::GlobalVars->curtime + Vars::Visuals::Line::DrawDuration.Value, Vars::Colors::LineIgnoreZ.Value);
+			//	if (Vars::Colors::Line.Value.a)
+			//		G::LineStorage.emplace_back(std::pair<Vec3, Vec3>(vEyePos, vEyePos + vForward * flDist), I::GlobalVars->curtime + Vars::Visuals::Line::DrawDuration.Value, Vars::Colors::Line.Value, true);
+			//}
 			if (bBoxes)
 			{
 				auto vBoxes = F::Visuals.GetHitboxes(tTarget.m_pRecord->m_aBones, tTarget.m_pEntity->As<CBaseAnimating>());
@@ -707,7 +733,7 @@ bool CAimbotMelee::RunSapper(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd
 		bShouldAim = pCmd->buttons & IN_ATTACK;
 	if (Vars::Aimbot::General::AimType.Value == Vars::Aimbot::General::AimTypeEnum::Silent)
 		bShouldAim &= !I::ClientState->chokedcommands && F::Ticks.CanChoke(true);
-		
+
 	if (bShouldAim)
 	{
 		G::AimTarget = { tTarget.m_pEntity->entindex(), I::GlobalVars->tickcount };
