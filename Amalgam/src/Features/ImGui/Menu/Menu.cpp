@@ -3115,8 +3115,9 @@ void CMenu::MenuSettings(int iTab)
 				tBind.m_bNot = iNot;
 				FDropdown("Visibility", &tBind.m_iVisibility, { "Always", "While active", "Hidden" }, {}, FDropdownEnum::Right);
 				if (tBind.m_iType == 0)
-					FKeybind(Vars::Misc::Zoom::Key, FButtonEnum::Right | FButtonEnum::SameLine,
-						{ Vars::Menu::PrimaryKey[DEFAULT_BIND], Vars::Menu::SecondaryKey[DEFAULT_BIND] });
+					FKeybind("Key", tBind.m_iKey, FButtonEnum::None,
+						{ Vars::Menu::PrimaryKey[DEFAULT_BIND], Vars::Menu::SecondaryKey[DEFAULT_BIND] },
+						{ 0, 40 }, -96);
 
 				// create/modify button
 				bool bCreate = false, bClear = false, bParent = true;
