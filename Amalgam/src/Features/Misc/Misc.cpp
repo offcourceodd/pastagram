@@ -8,9 +8,9 @@
 
 void CMisc::RunPre(CTFPlayer* pLocal, CUserCmd* pCmd)
 {
+	RunZoom();
 	CheatsBypass();
 	WeaponSway();
-	RunZoom();
 	AntiAFK(pLocal, pCmd);
 	InstantRespawnMVM(pLocal);
 	NoisemakerSpam(pLocal);

@@ -1247,6 +1247,28 @@ void CMenu::MenuVisuals(int iTab)
 					FToggle(Vars::Visuals::UI::ScoreboardColors, FToggleEnum::Left);
 					FToggle(Vars::Visuals::UI::CleanScreenshots, FToggleEnum::Right);
 				} EndSection();
+
+				if (Section("Zoom"))
+				{
+					FToggle(Vars::Misc::Zoom::Enabled);
+					FDropdown(Vars::Misc::Zoom::Mode, FDropdownEnum::Left);
+					FKeybind(Vars::Misc::Zoom::Key, FButtonEnum::Right | FButtonEnum::SameLine,
+						{ Vars::Menu::PrimaryKey[DEFAULT_BIND], Vars::Menu::SecondaryKey[DEFAULT_BIND] });
+
+					PushTransparent(!Vars::Misc::Zoom::Enabled.Value);
+					{
+						FSlider(Vars::Misc::Zoom::FOV);
+						FToggle(Vars::Misc::Zoom::Smooth, FToggleEnum::Right);
+
+						PushTransparent(!Vars::Misc::Zoom::Smooth.Value);
+						{
+							FSlider(Vars::Misc::Zoom::Speed);
+						}
+						PopTransparent();
+					}
+					PopTransparent();
+				} EndSection();
+
 				if (Section("Thirdperson", 8))
 				{
 					FToggle(Vars::Visuals::Thirdperson::Enabled, FToggleEnum::Left);
@@ -3093,7 +3115,8 @@ void CMenu::MenuSettings(int iTab)
 				tBind.m_bNot = iNot;
 				FDropdown("Visibility", &tBind.m_iVisibility, { "Always", "While active", "Hidden" }, {}, FDropdownEnum::Right);
 				if (tBind.m_iType == 0)
-					FKeybind("Key", tBind.m_iKey, FButtonEnum::None, { Vars::Menu::PrimaryKey[DEFAULT_BIND], Vars::Menu::SecondaryKey[DEFAULT_BIND] }, { 0, 40 }, -96);
+					FKeybind(Vars::Misc::Zoom::Key, FButtonEnum::Right | FButtonEnum::SameLine,
+						{ Vars::Menu::PrimaryKey[DEFAULT_BIND], Vars::Menu::SecondaryKey[DEFAULT_BIND] });
 
 				// create/modify button
 				bool bCreate = false, bClear = false, bParent = true;
