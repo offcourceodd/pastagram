@@ -3,8 +3,9 @@
 #include "../PacketManip/AntiAim/AntiAim.h"
 #include "../EnginePrediction/EnginePrediction.h"
 #include "../Aimbot/AutoRocketJump/AutoRocketJump.h"
-#include "../Backtrack/Backtrack.h"
 #include "../AntiCheatCompatibility/AntiCheatCompatibility.h"
+#include "../Backtrack/Backtrack.h"
+
 
 void CTicks::Reset()
 {
@@ -33,11 +34,12 @@ void CTicks::Recharge(CTFPlayer* pLocal)
 		m_iDeficit--, m_iShiftedTicks--;
 	}
 
-	if (!Vars::Doubletap::RechargeTicks.Value && !bPassive
+	if (!Vars::Doubletap::RechargeTicks.Value && !bPassive && !m_bRechargeQueue
 		|| m_bDoubletap || m_bWarp || m_iShiftedTicks == m_iMaxShift || m_bSpeedhack)
 		return;
 
 	m_bRecharge = true;
+	m_bRechargeQueue = false;
 	m_iShiftedGoal = m_iShiftedTicks + 1;
 }
 
@@ -79,6 +81,8 @@ void CTicks::Doubletap(CTFPlayer* pLocal, CUserCmd* pCmd)
 		m_bAntiWarp = pLocal->m_hGroundEntity();
 }
 
+static Vec3 s_vVelocity = {};
+static int s_iMaxTicks = 0;
 void CTicks::Speedhack()
 {
 	m_bSpeedhack = Vars::Speedhack::Scale.Value != 1;
@@ -88,8 +92,6 @@ void CTicks::Speedhack()
 	m_bDoubletap = m_bWarp = m_bRecharge = false;
 }
 
-static Vec3 s_vVelocity = {};
-static int s_iMaxTicks = 0;
 void CTicks::AntiWarp(CTFPlayer* pLocal, float flYaw, float& flForwardMove, float& flSideMove, int iTicks)
 {
 	s_iMaxTicks = std::max(iTicks + 1, s_iMaxTicks);
@@ -335,7 +337,7 @@ int CTicks::GetTicks(CTFWeaponBase* pWeapon)
 		return m_iShiftedTicks - m_iShiftedGoal;
 
 	if (!Vars::Doubletap::Doubletap.Value
-		|| m_iWait || m_bWarp || m_bRecharge || m_bSpeedhack || F::AutoRocketJump.IsRunning())
+		|| m_iWait || m_bWarp || m_bRecharge || F::AutoRocketJump.IsRunning())
 		return 0;
 
 	int iTicks = std::min(m_iShiftedTicks + 1, 22);
@@ -408,7 +410,7 @@ bool CTicks::IsTimingUnsure()
 
 void CTicks::Draw(CTFPlayer* pLocal)
 {
-	if (!(Vars::Menu::Indicators.Value & Vars::Menu::IndicatorsEnum::Ticks) || !pLocal->IsAlive())
+	if (!(Vars::Menu::Indicators.Value & Vars::Menu::IndicatorsEnum::Ticks) || !pLocal || !pLocal->IsAlive())
 		return;
 
 	const DragBox_t dtPos = Vars::Menu::TicksDisplay.Value;

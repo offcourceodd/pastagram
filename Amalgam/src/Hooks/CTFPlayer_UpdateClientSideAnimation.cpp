@@ -8,7 +8,14 @@ MAKE_HOOK(CTFPlayer_UpdateClientSideAnimation, S::CTFPlayer_UpdateClientSideAnim
 	DEBUG_RETURN(CTFPlayer_UpdateClientSideAnimation, rcx);
 
 	auto pPlayer = reinterpret_cast<CTFPlayer*>(rcx);
-	if ((!Vars::Visuals::Removals::Interpolation.Value && !F::Resolver.GetAngles(pPlayer) || G::UpdatingAnims)
-		&& (pPlayer->entindex() != I::EngineClient->GetLocalPlayer() || I::EngineClient->IsPlayingDemo()))
+
+	const bool bIsLocalPlayer = pPlayer->entindex() == I::EngineClient->GetLocalPlayer()
+		&& !I::EngineClient->IsPlayingDemo();
+
+	const bool bSkipAnim = !bIsLocalPlayer
+		&& F::Resolver.GetAngles(pPlayer)
+		&& !G::UpdatingAnims;
+
+	if (!bSkipAnim)
 		CALL_ORIGINAL(rcx);
 }

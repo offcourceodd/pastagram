@@ -117,6 +117,8 @@ namespace G
 	inline bool AntiAim = false;
 	inline bool Choking = false;
 
+	inline bool SendPacket = true;
+
 	inline bool UpdatingAnims = false;
 	inline bool FlipViewmodels = false;
 

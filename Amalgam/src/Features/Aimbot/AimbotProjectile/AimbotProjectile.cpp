@@ -292,244 +292,200 @@ static inline bool AirSplash(CTFWeaponBase* pWeapon, Info_t& tInfo)
 	return false;
 }
 
-// ─── Counter-strafe prediction helpers ──────────────────────────────────────a
+
+// ─── Counter-strafe prediction ──────────────────────────────────────────────
 
 static inline bool CounterStrafeEnabled()
 {
-	return Vars::Aimbot::Projectile::StrafePrediction.Value & Vars::Aimbot::Projectile::StrafePredictionEnum::CounterStrafe;
+	return Vars::Aimbot::Projectile::StrafePrediction.Value
+		& Vars::Aimbot::Projectile::StrafePredictionEnum::CounterStrafe;
 }
 
 static inline bool CounterStrafeOnDirect()
 {
-	return Vars::Aimbot::Projectile::StrafePrediction.Value & Vars::Aimbot::Projectile::StrafePredictionEnum::UseOnDirect;
+	return Vars::Aimbot::Projectile::StrafePrediction.Value
+		& Vars::Aimbot::Projectile::StrafePredictionEnum::UseOnDirect;
 }
 
 static inline bool CounterStrafeOnSplash()
 {
-	return Vars::Aimbot::Projectile::StrafePrediction.Value & Vars::Aimbot::Projectile::StrafePredictionEnum::UseOnSplash;
+	return Vars::Aimbot::Projectile::StrafePrediction.Value
+		& Vars::Aimbot::Projectile::StrafePredictionEnum::UseOnSplash;
 }
 
-// Cached convar values — add these near the top of the file (after includes)
-struct CounterStrafeVars_t
-{
-	float flGravity = 800.f;
-	float flFriction = 4.f;
-	float flStopSpeed = 100.f;
-	float flAccelerate = 10.f;
-	float flAirAccelerate = 12.f;
-	float flJumpImpulse = 268.f;
-
-	void Refresh()
-	{
-		static auto sv_gravity = H::ConVars.FindVar("sv_gravity");
-		static auto sv_friction = H::ConVars.FindVar("sv_friction");
-		static auto sv_stopspeed = H::ConVars.FindVar("sv_stopspeed");
-		static auto sv_accelerate = H::ConVars.FindVar("sv_accelerate");
-		static auto sv_airaccelerate = H::ConVars.FindVar("sv_airaccelerate");
-		static auto sv_jump_impulse = H::ConVars.FindVar("sv_jump_impulse");
-
-		if (sv_gravity)       flGravity = sv_gravity->GetFloat();
-		if (sv_friction)      flFriction = sv_friction->GetFloat();
-		if (sv_stopspeed)     flStopSpeed = sv_stopspeed->GetFloat();
-		if (sv_accelerate)    flAccelerate = sv_accelerate->GetFloat();
-		if (sv_airaccelerate) flAirAccelerate = sv_airaccelerate->GetFloat();
-		if (sv_jump_impulse)  flJumpImpulse = sv_jump_impulse->GetFloat();
-		else                  flJumpImpulse = sqrtf(2.f * flGravity * 45.f); // TF2 fallback
-	}
-};
-static CounterStrafeVars_t s_tCS;
-
-static inline void SimulateFrictionOnly(Vec3& vVelocity, float flFriction, bool bOnGround, float flFrametime)
+// Ground friction. Snake prediction uses this shared movement simulation too.
+static inline void SimulateFrictionOnly(
+	Vec3& vVelocity, float flFriction, bool bOnGround, float flFrameTime)
 {
 	if (!bOnGround || flFriction <= 0.f)
 		return;
 
-	float flSpeed = vVelocity.Length();
+	const float flSpeed = vVelocity.Length2D();
 	if (flSpeed <= 0.1f)
 		return;
 
-	float flControl = std::max(flSpeed, s_tCS.flStopSpeed);
-	float flDrop = flControl * flFriction * flFrametime;
-	float flNewSpeed = std::max(0.f, flSpeed - flDrop);
+	static auto sv_stopspeed = H::ConVars.FindVar("sv_stopspeed");
+	const float flStopSpeed = sv_stopspeed ? sv_stopspeed->GetFloat() : 100.f;
+	const float flControl = std::max(flSpeed, flStopSpeed);
+	const float flDrop = flControl * flFriction * flFrameTime;
+	const float flNewSpeed = std::max(0.f, flSpeed - flDrop);
+
 	if (flNewSpeed > 0.f)
 		vVelocity *= flNewSpeed / flSpeed;
 	else
-		vVelocity = {};
+	{
+		vVelocity.x = 0.f;
+		vVelocity.y = 0.f;
+	}
 }
 
-static inline void SimulateStrafeTick(Vec3& vVelocity, Vec3& vPosition, const Vec3& vWishDir,
-	float flMaxSpeed, float flAccel, float flFriction, bool bOnGround, float flFrametime)
+static inline void SimulateStrafeTick(
+	Vec3& vVelocity, Vec3& vPosition, const Vec3& vWishDir,
+	float flMaxSpeed, float flAccel, float flFriction,
+	bool bOnGround, float flFrameTime)
 {
-	constexpr float flAirWishSpeedCap = 30.f; // PM_AirAccelerate wishspd cap
+	SimulateFrictionOnly(vVelocity, flFriction, bOnGround, flFrameTime);
 
-	// 1. Friction (ground only) — happens first, matches CGameMovement order
-	SimulateFrictionOnly(vVelocity, flFriction, bOnGround, flFrametime);
-
-	// 2. Acceleration
 	if (!vWishDir.IsZero())
 	{
-		if (bOnGround)
+		const float flWishSpeed = bOnGround
+			? flMaxSpeed
+			: std::min(flMaxSpeed, 30.f);
+
+		const float flCurrentSpeed = vVelocity.Dot(vWishDir);
+		const float flAddSpeed = flWishSpeed - flCurrentSpeed;
+
+		if (flAddSpeed > 0.f)
 		{
-			// PM_Accelerate: addspeed uses maxspeed, accelspeed uses maxspeed
-			float flCurrentSpeed = vVelocity.Dot(vWishDir);
-			float flAddSpeed = flMaxSpeed - flCurrentSpeed;
-			if (flAddSpeed > 0.f)
-			{
-				float flAccelSpeed = flAccel * flMaxSpeed * flFrametime;
-				if (flAccelSpeed > flAddSpeed)
-					flAccelSpeed = flAddSpeed;
-				vVelocity += vWishDir * flAccelSpeed;
-			}
-		}
-		else
-		{
-			// PM_AirAccelerate: addspeed uses CAPPED wishspd,
-			//                   accelspeed uses UNCAPPED wishspeed (= flMaxSpeed)
-			float flWishSpd = std::min(flMaxSpeed, flAirWishSpeedCap);
-			float flCurrentSpeed = vVelocity.Dot(vWishDir);
-			float flAddSpeed = flWishSpd - flCurrentSpeed;
-			if (flAddSpeed > 0.f)
-			{
-				float flAccelSpeed = flAccel * flMaxSpeed * flFrametime; // uncapped!
-				if (flAccelSpeed > flAddSpeed)
-					flAccelSpeed = flAddSpeed;
-				vVelocity += vWishDir * flAccelSpeed;
-			}
+			float flAccelSpeed = flAccel * flMaxSpeed * flFrameTime;
+			flAccelSpeed = std::min(flAccelSpeed, flAddSpeed);
+			vVelocity += vWishDir * flAccelSpeed;
 		}
 	}
 
-	// 3. Integrate position with the post-accel velocity (this was MISSING before)
-	vPosition += vVelocity * flFrametime;
-
+	vPosition += vVelocity * flFrameTime;
 }
 
-// Finer 30° fan, and writes into a caller-provided buffer (no allocation)
-static inline void GetCounterStrafeDirs(const Vec3& vVelocity, float flViewYaw, float flMinSpeed,
-	std::vector<Vec3>& vDirsOut)
-{
-	vDirsOut.clear();
-	vDirsOut.push_back({}); // "no keys" always first
-
-	Vec3 vVel2D = vVelocity; vVel2D.z = 0.f;
-	float flSpeed = vVel2D.Length();
-	if (flSpeed < flMinSpeed)
-		return;
-
-	static constexpr float aAngles[] = { 0.f, 45.f, -45.f, 90.f, -90.f, 135.f, -135.f, 180.f };
-	vDirsOut.reserve(std::size(aAngles) + 1);
-	for (float flAngle : aAngles)
-	{
-		float flRad = Math::Deg2Rad(flViewYaw + flAngle);
-		vDirsOut.push_back(Vec3(cosf(flRad), sinf(flRad), 0.f));
-	}
-}
-
-
-static inline Vec3 SimulateCounterStrafePath(const Vec3& vStart, const Vec3& vVelocity, const Vec3& vWishDir,
-	float flMaxSpeed, float flAccel, float flFriction, bool bOnGround, int iTicks)
+static inline Vec3 SimulateCounterStrafePath(
+	const Vec3& vStart, const Vec3& vVelocity, const Vec3& vWishDir,
+	float flMaxSpeed, float flAccel, float flFriction,
+	bool bOnGround, int iTicks)
 {
 	Vec3 vVel = vVelocity;
 	Vec3 vPos = vStart;
-	for (int t = 0; t < iTicks; t++)
-		SimulateStrafeTick(vVel, vPos, vWishDir, flMaxSpeed, flAccel, flFriction, bOnGround, I::GlobalVars->interval_per_tick);
+
+	const float flFrameTime = I::GlobalVars->interval_per_tick;
+
+	for (int i = 0; i < iTicks; ++i)
+	{
+		SimulateStrafeTick(
+			vVel, vPos, vWishDir, flMaxSpeed, flAccel,
+			flFriction, bOnGround, flFrameTime);
+	}
+
 	return vPos;
 }
 
-static inline float GetPlayerMaxSpeed(CTFPlayer* pEntity, CTFWeaponBase* pWeapon = nullptr)
+static inline float GetPlayerMaxSpeed(
+	CTFPlayer* pEntity, CTFWeaponBase* pWeapon = nullptr)
 {
-	// The engine tracks live maxspeed; trust it when sane.
-	float flMax = pEntity->m_flMaxspeed();
-	if (flMax > 1.f)
-		return flMax;
+	const float flMaxSpeed = pEntity->m_flMaxspeed();
+	if (flMaxSpeed > 1.f)
+		return flMaxSpeed;
 
-	// Fallback: replicate TF2's CalculateMaxSpeed
-	float flBase;
+	float flBaseSpeed = 300.f;
+
 	switch (pEntity->m_iClass())
 	{
-	case TF_CLASS_SCOUT:    flBase = 400.f; break;
-	case TF_CLASS_SOLDIER:  flBase = 240.f; break;
-	case TF_CLASS_PYRO:     flBase = 300.f; break;
-	case TF_CLASS_DEMOMAN:  flBase = 280.f; break;
-	case TF_CLASS_HEAVY:    flBase = 230.f; break;
-	case TF_CLASS_ENGINEER: flBase = 300.f; break;
-	case TF_CLASS_MEDIC:    flBase = 320.f; break;
-	case TF_CLASS_SNIPER:   flBase = 300.f; break;
-	case TF_CLASS_SPY:      flBase = 320.f; break;
-	default:                flBase = 300.f;
+	case TF_CLASS_SCOUT:    flBaseSpeed = 400.f; break;
+	case TF_CLASS_SOLDIER:  flBaseSpeed = 240.f; break;
+	case TF_CLASS_PYRO:     flBaseSpeed = 300.f; break;
+	case TF_CLASS_DEMOMAN:  flBaseSpeed = 280.f; break;
+	case TF_CLASS_HEAVY:    flBaseSpeed = 230.f; break;
+	case TF_CLASS_ENGINEER: flBaseSpeed = 300.f; break;
+	case TF_CLASS_MEDIC:    flBaseSpeed = 320.f; break;
+	case TF_CLASS_SNIPER:   flBaseSpeed = 300.f; break;
+	case TF_CLASS_SPY:      flBaseSpeed = 320.f; break;
 	}
 
-	// Weapon-specific overrides that matter for strafing targets
 	if (pWeapon)
 	{
 		switch (pWeapon->GetWeaponID())
 		{
 		case TF_WEAPON_MINIGUN:
-			if (pEntity->InCond(TF_COND_AIMING))   flBase = 110.f;
+			if (pEntity->InCond(TF_COND_AIMING))
+				flBaseSpeed = 110.f;
 			break;
+
 		case TF_WEAPON_SNIPERRIFLE:
 		case TF_WEAPON_SNIPERRIFLE_CLASSIC:
 		case TF_WEAPON_SNIPERRIFLE_DECAP:
-			if (pEntity->InCond(TF_COND_ZOOMED))   flBase *= 0.45f;
+			if (pEntity->InCond(TF_COND_ZOOMED))
+				flBaseSpeed *= 0.45f;
 			break;
+
 		case TF_WEAPON_COMPOUND_BOW:
-			if (pEntity->InCond(TF_COND_AIMING))   flBase *= 0.6f;
+			if (pEntity->InCond(TF_COND_AIMING))
+				flBaseSpeed *= 0.6f;
 			break;
 		}
 	}
 
-	// Heavy while spun-up uses a hull-relative duck modifier in the engine,
-	// but for movement purposes a flat 1/3 is a close approximation.
 	if (pEntity->m_fFlags() & FL_DUCKING)
-		flBase *= 0.333f;
+		flBaseSpeed *= 0.333f;
 
-	return flBase;
+	return flBaseSpeed;
 }
 
 static inline std::vector<Vec3> BuildCounterStrafePositions(
-	const Vec3& vOriginalPos, const Vec3& vStartOrigin, const Vec3& vVelocity, float flViewYaw,
-	CTFPlayer* pEntity, CTFWeaponBase* pWeapon, int iTick)
+	const Vec3& vOriginalPos,
+	const Vec3& vStartOrigin,
+	const Vec3& vVelocity,
+	float flViewYaw,
+	CTFPlayer* pEntity,
+	CTFWeaponBase* pWeapon)
 {
 	std::vector<Vec3> vPositions;
 	vPositions.push_back(vOriginalPos);
 
-	if (!CounterStrafeEnabled() || !pEntity || iTick < 1)
+	if (!CounterStrafeEnabled() || !pEntity)
 		return vPositions;
 
-	Vec3 vVel = vVelocity;
-	float flSpeed = vVel.Length2D();
+	Vec3 vHoriz = vVelocity; vHoriz.z = 0.f;
+	const float flSpeed = vHoriz.Length();
 	if (flSpeed < Vars::Aimbot::Projectile::CounterStrafeMinSpeed.Value)
 		return vPositions;
 
-	bool bOnGround = pEntity->IsOnGround();
+	const bool bOnGround = pEntity->IsOnGround();
 	if (!bOnGround && !Vars::Aimbot::Projectile::CounterStrafeAirborne.Value)
 		return vPositions;
 
-	// GetPlayerMaxSpeed now handles duck/weapon modifiers internally
-	float flMaxSpeed = GetPlayerMaxSpeed(pEntity, pWeapon);
-
-	const float flAccel = bOnGround ? Vars::Aimbot::Projectile::CounterStrafeGroundAccel.Value
-		: Vars::Aimbot::Projectile::CounterStrafeAirAccel.Value;
-	const float flFriction = Vars::Aimbot::Projectile::CounterStrafeGroundFriction.Value;
 	const int iTicks = Vars::Aimbot::Projectile::CounterStrafeTicks.Value;
-	const int iSimTicks = std::min(iTick, iTicks);
-
-	std::vector<Vec3> vDirs;
-	GetCounterStrafeDirs(vVel, flViewYaw, Vars::Aimbot::Projectile::CounterStrafeMinSpeed.Value, vDirs);
-	if (vDirs.size() <= 1)
+	if (iTicks <= 0)
 		return vPositions;
 
-	// Sort most-opposing-first so that with small MaxPaths budgets we test
-	// the directions that actually cancel velocity, not the identity dir.
-	Vec3 vVel2D = vVel; vVel2D.z = 0.f;
-	Vec3 vVelDir = vVel2D.Normalized();
-	std::sort(vDirs.begin() + 1, vDirs.end(),
-		[&](const Vec3& a, const Vec3& b) { return a.Dot(vVelDir) < b.Dot(vVelDir); });
+	const float flMaxSpeed = GetPlayerMaxSpeed(pEntity, pWeapon);
+	const float flAccel = bOnGround
+		? Vars::Aimbot::Projectile::CounterStrafeGroundAccel.Value
+		: Vars::Aimbot::Projectile::CounterStrafeAirAccel.Value;
+	const float flFriction =
+		Vars::Aimbot::Projectile::CounterStrafeGroundFriction.Value;
 
-	int iMaxPaths = std::min((int)vDirs.size(), (int)Vars::Aimbot::Projectile::CounterStrafeMaxPaths.Value);
-	for (int p = 0; p < iMaxPaths; p++)
+	// The player will press one of A/D. In Source, +right (D) has yaw+90,
+	// +left (A) has yaw-90. Both are equally plausible.
+	const float flBaseYaw = Math::Deg2Rad(flViewYaw);
+	const Vec3 vRight(cosf(flBaseYaw + Math::PI / 2.f), sinf(flBaseYaw + Math::PI / 2.f), 0.f);
+	const Vec3 vLeft(cosf(flBaseYaw - Math::PI / 2.f), sinf(flBaseYaw - Math::PI / 2.f), 0.f);
+
+	// Also add a full-reverse (S key) hypothesis — common on landing.
+	const Vec3 vBack = vHoriz.Normalized() * -1.f;
+
+	const Vec3 vWishDirs[3] = { vRight, vLeft, vBack };
+	for (int i = 0; i < 3; i++)
 	{
-		Vec3 vPos = SimulateCounterStrafePath(vStartOrigin, vVel, vDirs[p],
-			flMaxSpeed, flAccel, flFriction, bOnGround, iSimTicks);
+		Vec3 vPos = SimulateCounterStrafePath(
+			vStartOrigin, vVelocity, vWishDirs[i],
+			flMaxSpeed, flAccel, flFriction, bOnGround, iTicks);
 		vPositions.push_back(vPos);
 	}
 
@@ -549,6 +505,23 @@ struct SnakeHistory_t
 	struct Sample { Vec3 vOrigin; Vec3 vVelocity; float flViewYaw; };
 	std::deque<Sample> m_vSamples;
 };
+
+static inline bool ReversalDetected(const std::deque<float>& vLateral, float flMinMag)
+{
+	if (vLateral.size() < 4) return false;
+	float flLatest = vLateral.back();
+	float flPeak = 0.f;
+	for (float v : vLateral) flPeak = std::max(flPeak, fabsf(v));
+	if (flPeak < flMinMag) return false;
+
+	for (size_t i = 1; i < vLateral.size(); i++)
+	{
+		if (vLateral[i - 1] == 0.f || vLateral[i] == 0.f) continue;
+		if ((vLateral[i - 1] > 0.f) != (vLateral[i] > 0.f))
+			return true;
+	}
+	return fabsf(flLatest) < 0.5f * flPeak;
+}
 
 static inline float SnakeConfidence(const SnakeHistory_t& tHistory)
 {
@@ -1985,8 +1958,16 @@ int CAimbotProjectile::CanHit(Target_t& tTarget, CTFPlayer* pLocal, CTFWeaponBas
 		// Snapshot the *predicted* movement state at this tick
 				// Track yaw — use eye angles if available, else fall back to our own view yaw
 		float flViewYaw = tTarget.m_pEntity->As<CTFPlayer>()->GetEyeAngles().y;
-		if (flViewYaw == 0.f)
-			flViewYaw = I::EngineClient->GetViewAngles().y;
+
+		// If the target isn't moving, yaw is meaningless for a wishdir
+		Vec3 vTargetVel = tTarget.m_pEntity->As<CTFPlayer>()->m_vecVelocity();
+		if (vTargetVel.Length2D() < 1.f)
+			flViewYaw = 0.f;
+		else if (std::fabs(flViewYaw) < 1e-3f)
+		{
+			// Fall back to velocity heading — not perfect, but never use our own yaw
+			flViewYaw = Math::Rad2Deg(atan2f(vTargetVel.y, vTargetVel.x));
+		}
 
 		// Snapshot the *predicted* movement state at this tick
 		vSnapshots.push_back({ m_tMoveStorage.m_vPredictedOrigin,
@@ -2016,12 +1997,16 @@ int CAimbotProjectile::CanHit(Target_t& tTarget, CTFPlayer* pLocal, CTFWeaponBas
 			vTestPositions.push_back(tTarget.m_vPos);
 
 			// Counter-strafe branches
-			if (bWantCounterStrafe)
+			if (bWantCounterStrafe && ReversalDetected(vLateralHistory, Vars::Aimbot::Projectile::CounterStrafeMinSpeed.Value))
 			{
 				auto vCS = BuildCounterStrafePositions(
-					tTarget.m_vPos, tReactionState.vOrigin, tReactionState.vVelocity,
-					tReactionState.flViewYaw, tTarget.m_pEntity->As<CTFPlayer>(),
-					pWeapon, iReactionDelay);
+					tTarget.m_vPos,
+					tReactionState.vOrigin,
+					tReactionState.vVelocity,
+					tReactionState.flViewYaw,
+					tTarget.m_pEntity->As<CTFPlayer>(),
+					pWeapon);
+
 				if (vCS.size() > 1)
 					vTestPositions.insert(vTestPositions.end(), vCS.begin() + 1, vCS.end());
 			}
