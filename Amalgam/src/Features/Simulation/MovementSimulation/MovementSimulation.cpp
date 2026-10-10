@@ -58,7 +58,9 @@ static inline void HandleMovement(CTFPlayer* pPlayer, MoveData* pLastRecord, Mov
 		else */
 		{	// does this eat up fps? i can't tell currently
 			CGameTrace trace = {};
-			CTraceFilterWorldAndPropsOnly filter(pPlayer);
+			CTraceFilterWorldAndPropsOnly filter = {};
+			filter.pSkip = pPlayer;
+
 			SDK::TraceHull(pLastRecord->m_vOrigin, pLastRecord->m_vOrigin + pLastRecord->m_vVelocity * TICK_INTERVAL, pPlayer->m_vecMins() + PLAYER_ORIGIN_COMPRESSION, pPlayer->m_vecMaxs() - PLAYER_ORIGIN_COMPRESSION, pPlayer->SolidMask(), &filter, &trace);
 			if (trace.DidHit() && trace.plane.normal.z < 0.707f)
 			{
@@ -104,7 +106,6 @@ void CMovementSimulation::Store()
 	if (I::EngineClient->IsPlayingDemo())
 		return;
 
-	int iLocalIdx = I::EngineClient->GetLocalPlayer();
 	for (auto pEntity : H::Entities.GetGroup(EntityEnum::PlayerAll))
 	{
 		auto pPlayer = pEntity->As<CTFPlayer>();
@@ -114,7 +115,7 @@ void CMovementSimulation::Store()
 			vRecords.clear();
 			continue;
 		}
-		else if (pPlayer->entindex() == iLocalIdx || !H::Entities.GetDeltaTime(pPlayer->entindex()) && !pPlayer->IsDormant())
+		else if (pPlayer->entindex() == I::EngineClient->GetLocalPlayer() || !H::Entities.GetDeltaTime(pPlayer->entindex()) && !pPlayer->IsDormant())
 			continue;
 
 		Vec3 vVelocity = pPlayer->m_vecVelocity();
@@ -140,7 +141,7 @@ void CMovementSimulation::Store()
 	{
 		auto pPlayer = pEntity->As<CTFPlayer>();
 		auto& vSimTimes = m_mSimTimes[pPlayer->entindex()];
-		if (pEntity->entindex() == iLocalIdx || pPlayer->IsDormant() || !pPlayer->IsAlive() || pPlayer->IsAGhost())
+		if (pEntity->entindex() == I::EngineClient->GetLocalPlayer() || !pPlayer->IsAlive() || pPlayer->IsAGhost() || pPlayer->IsDormant())
 		{
 			vSimTimes.clear();
 			continue;
@@ -447,8 +448,7 @@ void CMovementSimulation::GetAverageYaw(MoveStorage& tMoveStorage, int iSamples)
 
 		float flYaw = 0.f;
 		bool bResult = GetYawDifference(tRecord1, tRecord2, !iTicks, &flYaw, flStraightFuzzyValue, iMaxChanges, iMaxChangeTime, flMaxSpeed);
-		if (Vars::Debug::Logging.Value)
-			SDK::Output("GetYawDifference", std::format("{} ({}): {}, {}", i, iTicks, flYaw, bResult).c_str(), { 50, 127, 75 }, OUTPUT_CONSOLE | OUTPUT_DEBUG);
+		SDK::Output("GetYawDifference", std::format("{} ({}): {}, {}", i, iTicks, flYaw, bResult).c_str(), { 50, 127, 75 }, Vars::Debug::Logging.Value);
 		if (!bResult)
 			break;
 
@@ -591,7 +591,7 @@ bool CMovementSimulation::SetDuck(MoveStorage& tMoveStorage, bool bDuck) // this
 			Vec3 vOrigin = tMoveStorage.m_MoveData.m_vecAbsOrigin - ((vHullMaxs - vHullMins) - (vDuckHullMaxs - vDuckHullMins));
 
 			CGameTrace trace = {};
-			CTraceFilterWorldAndPropsOnly filter(tMoveStorage.m_pPlayer);
+			CTraceFilterWorldAndPropsOnly filter = {};
 			SDK::TraceHull(vOrigin, vOrigin, vHullMins, vHullMaxs, tMoveStorage.m_pPlayer->SolidMask(), &filter, &trace);
 			if (trace.DidHit())
 				return false;

@@ -416,7 +416,9 @@ void CTicks::Draw(CTFPlayer* pLocal)
 	const DragBox_t dtPos = Vars::Menu::TicksDisplay.Value;
 	const auto& fFont = H::Fonts.GetFont(FONT_INDICATORS);
 
-
+	// ---------------------------------------------------------
+	// Speedhack short-circuit
+	// ---------------------------------------------------------
 	if (m_bSpeedhack)
 	{
 		H::Draw.StringOutlined(
@@ -431,7 +433,9 @@ void CTicks::Draw(CTFPlayer* pLocal)
 		return;
 	}
 
-
+	// =========================================================
+	// TICK CALCULATION (unchanged)
+	// =========================================================
 
 	int iAntiAimTicks = F::AntiAim.YawOn()
 		? F::AntiAim.AntiAimTicks()
@@ -451,7 +455,9 @@ void CTicks::Draw(CTFPlayer* pLocal)
 
 	bool bReady = iMax > 0 && iTicks >= iMax && !m_iWait;
 
-
+	// =========================================================
+	// COLUMN LAYOUT — mirrors binds exactly
+	// =========================================================
 
 	// Column offsets (relative to dtPos.x)
 	// col1 = label, col2 = value, col3 = state
@@ -461,7 +467,9 @@ void CTicks::Draw(CTFPlayer* pLocal)
 
 	const int iY = dtPos.y;
 
-
+	// =========================================================
+	// COLUMN 1 — "ticks" (accent when ready, dim otherwise)
+	// =========================================================
 
 	Color_t labelColor = bReady
 		? Vars::Menu::Theme::Active.Value
@@ -477,7 +485,9 @@ void CTicks::Draw(CTFPlayer* pLocal)
 		"ticks"
 	);
 
-	
+	// =========================================================
+	// COLUMN 2 — "24 / 24"
+	// =========================================================
 
 	H::Draw.StringOutlined(
 		fFont,
@@ -489,6 +499,9 @@ void CTicks::Draw(CTFPlayer* pLocal)
 		std::format("{} / {}", iTicks, iMax).c_str()
 	);
 
+	// =========================================================
+	// COLUMN 3 — "ready" / "build" / "wait"
+	// =========================================================
 
 	const char* sState =
 		m_iWait ? "wait" :
